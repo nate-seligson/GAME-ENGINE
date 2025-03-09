@@ -1,5 +1,4 @@
 import math
-from scene import Scene
 import json
 pixel_count = 24
 pixel_distance = 1
@@ -95,9 +94,3 @@ class Renderer:
 
     def sendToDevice():
         print("sent to device")
-g = Scene()
-g.graphics = [[[0 for i in range(pixel_count * 2)] for j in range(10)] for p in range(pixel_count * 2)]
-with open("forge.json", "r") as file:
-    g.graphics = json.load(file)["data"]
-    x = Renderer(rpm = 20).convertToTiming(g)
-    print(x)
