@@ -10,8 +10,8 @@ render_dict = renderer.renderDict
 
 # Precompute all LED positions and their activation times
 points = []
-period = 3.0  # Rotation period in seconds (for 20 RPM)
-max_radius = 64  # Maximum LED radius from the Renderer parameters
+period = 1.5  # Rotation period in seconds (for 20 RPM)
+max_radius = 32  # Maximum LED radius from the Renderer parameters
 
 for time_ms in render_dict:
     time_sec = time_ms / 1000.0
@@ -55,9 +55,9 @@ def update(frame):
     scat.set_offsets(np.column_stack((x[mask], y[mask])))
     
     # Update the reference line
-    ref_angle = (current_time / period) * 2 * math.pi
-    ref_line.set_data([0, max_radius * math.cos(ref_angle)], 
-                      [0, max_radius * math.sin(ref_angle)])
+    ref_angle = (current_time / period) * math.pi
+    ref_line.set_data([-max_radius * math.cos(ref_angle), max_radius * math.cos(ref_angle)], 
+                      [-max_radius * math.sin(ref_angle), max_radius * math.sin(ref_angle)])
     
     return scat, ref_line
 

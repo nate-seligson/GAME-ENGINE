@@ -1,6 +1,6 @@
 import math
 class Renderer:
-    def __init__(self, pixel_count = 45, pixel_distance = 5, rpm = 3000, LEDs_x = 64, LEDs_y = 32):
+    def __init__(self, pixel_count = 23, pixel_distance = 3, rpm = 3000, LEDs_x = 64, LEDs_y = 32):
         #rotation per min and rotation per second
         self.rpm = rpm
         self.rps = rpm/60
@@ -12,6 +12,8 @@ class Renderer:
         self.testQueue = []
         for a in range(-pixel_count, pixel_count, pixel_distance):
             for b in range(-pixel_count, pixel_count, pixel_distance):
+
+                bottom = b < 0 if b!= 0 else a<0
                 #get closest x pixel to grid point
                 a_squared = (a ** 2)
                 b_squared = (b ** 2)
@@ -24,11 +26,19 @@ class Renderer:
                 #make it clamped between 0 to 2pi instead od -pi to pi
                 if angle <= 0:
                     angle += (2 * math.pi)
+
+                if bottom:
+                    angle -= math.pi
+                    pixel_x *= -1
                 #calculate timing required to meet angle (ratio of 2pi : time_for_one_rotation)
-                time_for_one_rotation = 1/self.rps * 1000
+                time_for_one_rotation = (1/self.rps * 1000) # for half the screen
                 self.testQueue.append((pixel_x * math.cos(angle), pixel_x * math.sin(angle)))
-                ratio = angle/(2*math.pi)
+                ratio = angle/(2 * math.pi)
                 timing_final_ms = int(time_for_one_rotation * ratio)
+
+                if angle > math.pi:
+                    pixel_x *= -1
+                    timing_final_ms -= (time_for_one_rotation / 2)
                 ##add to render dict
                 #create pixel array if such does not exist 
                 data = {"activePixel":pixel_x, "x":a, "y":b}
@@ -41,7 +51,7 @@ class Renderer:
         sorted_keys = list(self.renderDict.keys())
         # Sort the keys
         sorted_keys.sort()
-        
+
         #make renderer queue
         for key in sorted_keys:
             #make time waits accurate to the steps after the last wait
