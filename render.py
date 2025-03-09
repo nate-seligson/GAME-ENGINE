@@ -1,6 +1,10 @@
 import math
+from scene import Scene
+import json
+pixel_count = 24
+pixel_distance = 1
 class Renderer:
-    def __init__(self, pixel_count = 23, pixel_distance = 3, rpm = 3000, LEDs_x = 64, LEDs_y = 32):
+    def __init__(self, pixel_count = pixel_count, pixel_distance = pixel_distance, rpm = 3000, LEDs_x = 64, LEDs_y = 32):
         #rotation per min and rotation per second
         self.rpm = rpm
         self.rps = rpm/60
@@ -8,11 +12,10 @@ class Renderer:
         #convert grid of pixels to a render queue -- after some seconds to wait, display this screen 
         print("building render dictionary...")
         self.renderDict = {}
-        self.renderQueue = []
         self.testQueue = []
+
         for a in range(-pixel_count, pixel_count, pixel_distance):
             for b in range(-pixel_count, pixel_count, pixel_distance):
-
                 bottom = b < 0 if b!= 0 else a<0
                 #get closest x pixel to grid point
                 a_squared = (a ** 2)
@@ -40,33 +43,61 @@ class Renderer:
                     pixel_x *= -1
                     timing_final_ms -= (time_for_one_rotation / 2)
                 ##add to render dict
-                #create pixel array if such does not exist 
-                data = {"activePixel":pixel_x, "x":a, "y":b}
+                #create pixel array if such does not exist
+                position_x = (a + pixel_count)
+                position_y = (b + pixel_count)
+
+                data = {"activePixel":pixel_x, "x":position_x, "y":position_y}
                 if timing_final_ms in self.renderDict:
                     self.renderDict[timing_final_ms].append(data)
                 else:
                     self.renderDict[timing_final_ms] = [data]
+    def createPipeline(self, graphicsSlice, y):
+        pipeline = {}
+        for delay,values in self.renderDict.items():
+            for data in values:
+                x,z = (data['x'],data['y'])
+                if (x,z) in graphicsSlice.keys():
+                    color = graphicsSlice[(x,z)]
+                    pipeline[delay] = [((data["activePixel"], y), color)]
+        return pipeline
 
-        #TO ADD make it so that it only goes for half and splits the screen in two
-        sorted_keys = list(self.renderDict.keys())
-        # Sort the keys
-        sorted_keys.sort()
-
-        #make renderer queue
-        for key in sorted_keys:
-            #make time waits accurate to the steps after the last wait
-            key_index = sorted_keys.index(key)
-            #first index has no adjustment
-            if key_index == 0:
-                adjusted_key = key
+    def convertToTiming(self,scene):
+        #create "master pipeline" from all XZ planes and combining them
+        master_pipeline = {}
+        for y in range(len(scene.graphics[0])):
+            graphicsSlice = {}
+            for x in range(len(scene.graphics)):
+                for z in range(len(scene.graphics[x][y])):
+                    if scene.graphics[x][y][z] != None:
+                        graphicsSlice[(x,z)] = scene.graphics[x][y][z]
+            #init master pipeline
+            if y == 0:
+                master_pipeline = self.createPipeline(graphicsSlice, y)
             else:
-                adjusted_key = key - sorted_keys[key_index-1]
-            self.renderQueue.append((adjusted_key, self.renderDict[key]))
-        print(self.renderQueue)
+                #add to master pipeline if already existant
+                for key,value in self.createPipeline(graphicsSlice, y).items():
+                    if key not in master_pipeline.keys():
+                        master_pipeline[key] = value
+                    else:
+                        master_pipeline[key] += value
+        
+        #sort master pipeline -- simplify delays so one comes after the other
+        ordered_keys = sorted(master_pipeline.keys())
+        subtractor = 0
+        sorted_master_pipeline = {}
+        for key in ordered_keys:
+            sorted_master_pipeline[key - subtractor] = master_pipeline[key]
+            subtractor = key
+        return sorted_master_pipeline
+        
+                    
 
-                
-    def convertToTiming(scene):
-        print("converting...")
     def sendToDevice():
         print("sent to device")
-Renderer(rpm = 20)
+g = Scene()
+g.graphics = [[[0 for i in range(pixel_count * 2)] for j in range(10)] for p in range(pixel_count * 2)]
+with open("forge.json", "r") as file:
+    g.graphics = json.load(file)["data"]
+    x = Renderer(rpm = 20).convertToTiming(g)
+    print(x)
