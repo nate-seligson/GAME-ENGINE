@@ -1,7 +1,7 @@
 import math
 import json
 pixel_count = 24
-pixel_distance = 1
+pixel_distance = 2
 class Renderer:
     def __init__(self, pixel_count = pixel_count, pixel_distance = pixel_distance, rpm = 3000, LEDs_x = 64, LEDs_y = 32):
         #rotation per min and rotation per second
@@ -11,7 +11,6 @@ class Renderer:
         #convert grid of pixels to a render queue -- after some seconds to wait, display this screen 
         print("building render dictionary...")
         self.renderDict = {}
-        self.testQueue = []
 
         for a in range(-pixel_count, pixel_count, pixel_distance):
             for b in range(-pixel_count, pixel_count, pixel_distance):
@@ -34,7 +33,6 @@ class Renderer:
                     pixel_x *= -1
                 #calculate timing required to meet angle (ratio of 2pi : time_for_one_rotation)
                 time_for_one_rotation = (1/self.rps * 1000) # for half the screen
-                self.testQueue.append((pixel_x * math.cos(angle), pixel_x * math.sin(angle)))
                 ratio = angle/(2 * math.pi)
                 timing_final_ms = int(time_for_one_rotation * ratio)
 
@@ -64,12 +62,12 @@ class Renderer:
     def convertToTiming(self,scene):
         #create "master pipeline" from all XZ planes and combining them
         master_pipeline = {}
-        for y in range(len(scene.graphics[0])):
+        for y in range(len(scene[0])):
             graphicsSlice = {}
-            for x in range(len(scene.graphics)):
-                for z in range(len(scene.graphics[x][y])):
-                    if scene.graphics[x][y][z] != None:
-                        graphicsSlice[(x,z)] = scene.graphics[x][y][z]
+            for x in range(len(scene)):
+                for z in range(len(scene[x][y])):
+                    if scene[x][y][z] != None:
+                        graphicsSlice[(x,z)] = scene[x][y][z]
             #init master pipeline
             if y == 0:
                 master_pipeline = self.createPipeline(graphicsSlice, y)
@@ -92,5 +90,30 @@ class Renderer:
         
                     
 
-    def sendToDevice():
-        print("sent to device")
+    def sendToDevice(self, scene):
+
+        master_pipeline = self.convertToTiming(scene)
+        timings = master_pipeline.keys()
+        positions = []
+        #build screens
+        for array in master_pipeline.values():
+            pixelArray = [[(0,0,0) for _ in range(32)] for _ in range(64)]
+            for x in range(len(array)):
+                pixelArray[array[x][0][0] + 30][array[x][0][1]] = array[x][1]
+            positions.append(pixelArray)
+        print(timings)
+        return positions
+
+def write_positions_to_file(positions, filename="arrays.txt"):
+    with open(filename, "w") as f:
+        for array in positions:
+            for x in range(len(array)):
+                for y in range(len(array[x])):
+                    r, g, b = array[x][y]
+                    f.write(f"{x},{y},{r},{g},{b}\n")  # Adjusted for x offset
+            f.write("\n")  # Empty line to separate arrays
+
+    print(f"Saved {len(positions)} arrays to {filename}")
+r = Renderer(rpm=20)
+graphics = [[[(255,255,255) for _ in range(pixel_count * 2)] for _ in range(30)] for _ in range(pixel_count * 2)]
+write_positions_to_file(r.sendToDevice(graphics))
