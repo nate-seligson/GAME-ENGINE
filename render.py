@@ -2,9 +2,10 @@ import math
 import socket
 import time
 import struct
-
+import select
+from sprite import Sprite
 pixel_count = 24
-pixel_distance = 1
+pixel_distance = 2
 
 class Renderer:
     def __init__(self, pixel_count=pixel_count, pixel_distance=pixel_distance, rpm=3000, LEDs_x=64, LEDs_y=32):
@@ -12,6 +13,7 @@ class Renderer:
         self.rpm = rpm / 2
         self.rps = self.rpm / 60
         self.sock = None
+        self.pixel_fmt = struct.Struct('BBBBB')  # Precompile struct
         # convert grid of pixels to a render queue -- after some seconds to wait, display this screen 
         print("Building render dictionary...")
         self.renderDict = {}
@@ -33,7 +35,7 @@ class Renderer:
                     angle -= math.pi
                     pixel_x *= -1
                 # calculate timing (ms) for this pixel
-                time_for_one_rotation = (1 / self.rps * 1000)  # for half the screen
+                time_for_one_rotation = (1 / self.rps * 10000)  # for half the screen
                 ratio = angle / (2 * math.pi)
                 timing_final_ms = int(time_for_one_rotation * ratio)
 
@@ -92,12 +94,13 @@ class Renderer:
 
     def sendToDevice(self, scene, host='192.168.1.186', port=8888):
         positions, timings = self.convertToTiming(scene)
+        print(sum(timings))
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 self.sock = sock
                 # Enable TCP_NODELAY to bypass Nagle’s algorithm (minimizes delays)
                 self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                self.sock.settimeout(2)  # Default timeout for general operations
+                self.sock.settimeout(10)  # Default timeout for general operations
                 self.sock.connect((host, port))
                 print(f"Connected to {host}:{port}")
 
@@ -112,67 +115,43 @@ class Renderer:
 
     def process_frames(self, positions, timings):
         sock = self.sock
-        """
-        Process and send frames over the socket. If a reset signal (0 byte) is received,
-        exit early from all loops.
-        
-        Returns True if a reset signal was detected; False otherwise.
-        """
-        # Precompile struct for rapid pixel packing (5 bytes per pixel)
-        pixel_fmt = struct.Struct('BBBBB')
-        for i in [1, -1]:
-            for frame, timing in zip(positions, timings):
-                # Save the current timeout and set a short one to check for reset signal.
-                original_timeout = sock.gettimeout()
-                try:
-                    sock.settimeout(0.00001)
-                    data = sock.recv(1)
-                    if data and data == b'\x00':  # Reset signal detected
-                        return True
-                except socket.timeout:
-                    # No reset signal, continue processing
-                    pass
-                finally:
-                    sock.settimeout(original_timeout)
-                
-                # Clamp timing between 0 and 1500
-                frame_delay = max(0, min(int(timing), 1500))
-                buffer = bytearray()
-                
-                # Process each pixel in the frame
-                for (x, y), (r, g, b) in frame:
-                    # Transform coordinates – if static, consider precomputing these.
-                    panel_x = max(0, min((x * i) + 31, 63))
-                    panel_y = max(0, min(y, 31))
-                    buffer.extend(pixel_fmt.pack(panel_x, panel_y, r, g, b))
-                
-                # Append frame metadata: 2 bytes delay + 2-byte end marker
-                buffer.extend(frame_delay.to_bytes(2, 'big'))
-                buffer.extend(b'\xFF\xFF')
-                
-                # Send the entire frame immediately
-                sock.sendall(buffer)
+        check_reset = lambda: select.select([sock], [], [], 0)[0]
+        for frame, timing in zip(positions, timings):
+            if check_reset():  # Reset detected
+                if sock.recv(1) == b'\x00':
+                    return True
+            
+            frame_delay = max(0, min(int(timing), 1500))
+
+            # Build buffer efficiently
+            buffer = bytearray()
+            buffer_extend = buffer.extend  # Local reference for speed
+            pack = self.pixel_fmt.pack  # Local reference for speed
+
+            for (x, y), (r, g, b) in frame:
+                panel_x = max(0, min((x) + 31, 63))
+                panel_y = max(0, min(y, 31))
+                buffer_extend(pack(panel_x, panel_y, r, g, b))
+
+            buffer.extend(frame_delay.to_bytes(2, 'big'))
+            buffer.extend(b'\xFF\xFF')
+
+            sock.sendall(buffer)  # Send everything at once
+
         return False
 
     def send_positions_over_wifi(self, positions, timings):
         sock = self.sock
-        reset_detected = self.process_frames(sock, positions, timings)
-        # Optionally, you can adjust this timeout as needed.
-        while not reset_detected:
-            sock.settimeout(1)
-            try:
-                data = sock.recv(1)
-                if data and data == b'\x00':
-                    break  # Restart frame processing
-            except socket.timeout:
-                # No reset received within timeout; assume continuation of operation.
-                print("No reset signal received")
+        while not self.process_frames(positions, timings):
+            ready = select.select([sock], [], [], 1)[0]  # Wait for 1 second for any reset signal
+            if ready:
+                reset_signal = sock.recv(1)  # Read 1 byte to check if there's a reset signal
+                if reset_signal == b'\x00':
+                    break  # Reset detected, exit the loop
 
 if __name__ == "__main__":
     # Example usage with WiFi parameters
-    r = Renderer(rpm=1000)
-    
-    scene = [[[(255, 0, 255) if z < 32 else (255,0,0) for z in range(pixel_count * 2)] for _ in range(32)] for _ in range(pixel_count * 2)]
-    
+    r = Renderer(rpm=5000)
+    scene = [[[(0, 0, 0) if z < 32 else (0,255,0) for z in range(pixel_count * 2)] for _ in range(32)] for _ in range(pixel_count * 2)]
     # Send to device (replace IP with your ESP32's IP)
     r.sendToDevice(scene)   
